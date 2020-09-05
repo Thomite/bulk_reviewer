@@ -9,9 +9,7 @@ from PyQt5.QtWidgets import QHBoxLayout, QGroupBox, QDialog, QGridLayout, QLabel
 
 import glob
 import random
-
 import pandas as pd
-
 import argparse
 
 def initialise_review_dataset(directory):
@@ -19,6 +17,7 @@ def initialise_review_dataset(directory):
 	fn = directory + "/reviews.csv"
 
 	if os.path.exists(fn):
+		print("Resuming previous review session.")
 		return pd.read_csv(fn)
 
 	else:
@@ -44,16 +43,21 @@ def update_reviews(original_dset, updated_dset):
 
 class ClickableLabel(QLabel):
 
+	unselected_style = "QLabel {padding: 5px; background-color: #000000;}"
+	selected_style = "QLabel {padding: 5px; background-color: #C10000;}"
+
 	def __init__(self, ID, filename, parent):
 		super().__init__()
 		self.setAcceptDrops(True)
 
 		pixmap = QPixmap(filename)
-		pixmap = pixmap.scaled(200, 200, QtCore.Qt.KeepAspectRatio)
+		pixmap = pixmap.scaled(parent.image_width, parent.image_height, QtCore.Qt.KeepAspectRatio)
 
 		self.setPixmap(pixmap)
 		self.clicked = False
-		self.setStyleSheet("QLabel {padding: 5px}")
+		self.setStyleSheet(ClickableLabel.unselected_style)
+
+		self.setAlignment(Qt.AlignCenter)
 
 		self.ID = ID 
 		self.filename = filename
@@ -65,12 +69,12 @@ class ClickableLabel(QLabel):
 
 			self.clicked = True
 			self.mainwindow_parent.set_review(self.ID, -1)
-			self.setStyleSheet("QLabel {padding: 5px; background-color: #F10000}")
+			self.setStyleSheet(ClickableLabel.selected_style)
 
 		else:
 			self.clicked = False
 			self.mainwindow_parent.set_review(self.ID, 1)
-			self.setStyleSheet("QLabel {padding: 5px; background-color: #0000F1}")
+			self.setStyleSheet(ClickableLabel.unselected_style)
 
 	def mousePressEvent(self, event):
         
@@ -82,18 +86,23 @@ class ClickableLabel(QLabel):
 
 class App(QMainWindow):
 
-	def __init__(self):
+	def __init__(self, parser_args):
 		super().__init__()
+
+		self.parser_args = parser_args
 		self.left = 50
 		self.top = 50
 		self.title = 'Bulk reviewer'
-		self.width = 640
+		self.width = 960
 		self.height = 640
 
-		self.num_rows = 2
-		self.num_cols = 2
+		self.num_rows = self.parser_args.num_rows
+		self.num_cols = self.parser_args.num_cols
 
-		self.directory = "D:/Projects/Sit/"
+		self.image_width = self.width / self.num_cols
+		self.image_height = self.height / self.num_rows
+
+		self.directory = self.parser_args.directory
 		self.reviews = initialise_review_dataset(self.directory)
 
 		self.initUI()
@@ -104,20 +113,17 @@ class App(QMainWindow):
 		self.setGeometry(self.left, self.top, self.width, self.height)
 
 		self.central_widget = QWidget()
-		self.setCentralWidget(self.central_widget)
-
 		self.central_widget_layout = QGridLayout()
 		self.central_widget.setLayout(self.central_widget_layout)
+		self.setCentralWidget(self.central_widget)
 
 		# -- Create stuff
 		self.create_montage_panel()
 		self.create_progress_panel()
 
-
 		# -- Place stuff
 		self.central_widget_layout.addWidget(self.montage_panel, 0, 0)
 		self.central_widget_layout.addWidget(self.progress_panel, 1, 0)
-		# --
 
 		self.update_montage_panel()
 		self.update_progress_panel()
@@ -136,9 +142,11 @@ class App(QMainWindow):
 
 		self.progress_bar = QProgressBar()
 		self.label_progress = QLabel(self.progress_panel)
+		#self.label_summary = QLabel(self.progress_panel)
 
 		self.progress_panel_layout.addWidget(self.progress_bar, 0, 0)
 		self.progress_panel_layout.addWidget(self.label_progress, 0, 1)
+		#self.progress_panel_layout.addWidget(self.label_summary, 1, 0)
 
 	def clear_montage_panel(self):
 		for i in reversed(range(self.montage_panel_layout.count())): 
@@ -149,13 +157,16 @@ class App(QMainWindow):
 		num_reviewed = sum(self.reviews["reviewed"] == True)
 		num_remaining = sum(self.reviews["reviewed"] == False)
 		total = len(self.reviews)
-
 		percent_done = (num_reviewed / total) * 100
+		
+		num_flagged = sum(self.reviews["score"] == -1)
+		num_okay = sum(self.reviews["score"] == 1)
 
-		description = f"({num_reviewed} of {total})"
+		description = f"({num_reviewed} of {total}) [{num_flagged} flagged]"
 
 		self.progress_bar.setValue(percent_done)
 		self.label_progress.setText(description)
+		#self.label_summary.setText(summary)
 
 	def update_montage_panel(self):
 		
@@ -164,8 +175,6 @@ class App(QMainWindow):
 		N = int(self.num_rows * self.num_cols)
 
 		self.currently_showing_images = get_unreviewed(self.reviews, N=N)
-		
-		filenames = list(self.currently_showing_images["filename"])
 
 		n = 0
 
@@ -193,43 +202,55 @@ class App(QMainWindow):
 
 		update_reviews(self.reviews, self.currently_showing_images)
 
+	def next(self):
+
+		self.commit_reviews()
+		self.update_montage_panel()
+		self.update_progress_panel()
+
+	def previous(self):
+
+		print("previous() not implemented yet")
+
 	def keyPressEvent(self, event):
 
 		key = event.key()
 
-		if key == Qt.Key_Escape:
+		if key == Qt.Key_Escape or key == Qt.Key_Q:
 			self.close_window()
 
-		elif key == Qt.Key_Right:
+		elif key == Qt.Key_Right or key == Qt.Key_D:
+			self.next()
 
-			print("NEXT")
-			self.commit_reviews()
-			self.update_montage_panel()
-			self.update_progress_panel()
+		elif key == Qt.Key_Left or key == Qt.Key_A:
+			self.previous()
 
 		elif key == Qt.Key_P:
-			print("Printing reviews")
 			self.print_reviews()
-
 
 	def print_reviews(self):
 
 		try:
-			self.reviews.to_csv(self.directory + "/reviews.csv")
+			self.reviews.to_csv(self.directory + "/reviews.csv", index=False)
 
 		except:
 			print("Couldn't print to reviews.csv")
 
 	def close_window(self):
 
-		
 		self.close()
 
-	def closeEvent(self, event):#
+	def closeEvent(self, event):
 		self.print_reviews()
 		self.deleteLater()
 
 if __name__ == '__main__':
+
+	parser = argparse.ArgumentParser(description='Bulk review images in a directory.')
+	parser.add_argument('directory')
+	parser.add_argument('--num_rows', type=int, default=3)
+	parser.add_argument('--num_cols', type=int, default=6)
+
 	app = QApplication(sys.argv)
-	ex = App()
+	ex = App(parser.parse_args())
 	sys.exit(app.exec_())
